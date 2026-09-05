@@ -316,6 +316,8 @@ help:
 	@printf "  all          Compile btop (default argument)\n"
 	@printf "  clean        Remove built objects\n"
 	@printf "  distclean    Remove built objects and binaries\n"
+	@printf "  container    Build and test btop with scripts/container-build\n"
+	@printf "  container-install  Build in the container and install to \$$PREFIX ($(PREFIX))\n"
 	@printf "  install      Install btop++ to \$$PREFIX ($(PREFIX))\n"
 	@printf "  setcap       Set extended capabilities on binary (preferable to setuid)\n"
 	@printf "  setuid       Set installed binary owner/group to \$$SU_USER/\$$SU_GROUP ($(SU_USER)/$(SU_GROUP)) and set SUID bit\n"
@@ -356,6 +358,13 @@ distclean: clean
 	@$(call red,Removing: $(WHITE)built binaries,...)
 	@rm -rf $(TARGETDIR)
 	@test -e lib/rocm_smi_lib/build && rm -rf lib/rocm_smi_lib/build || true
+
+container:
+	@$(call green,Building and testing btop in the container,...,\n)
+	@./scripts/container-build
+
+container-install: container
+	@$(MAKE) --no-print-directory install
 
 install:
 	@$(call green,Installing binary to: $(WHITE)$(DESTDIR)$(PREFIX)/bin/btop)
@@ -479,4 +488,4 @@ $(BUILDDIR)/%.c.o: $(SRCDIR)/$(PLATFORM_DIR)/intel_gpu_top/%.c | directories
 
 
 #? Non-File Targets
-.PHONY: all config.h msg help pre
+.PHONY: all config.h msg help pre container container-install install

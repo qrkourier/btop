@@ -23,3 +23,10 @@ else
 fi
 
 ctest --test-dir "$build_dir" --output-on-failure
+
+if [ -d /artifacts ]; then
+	cp "$build_dir/btop" /artifacts/btop
+	if [ -f "$build_dir/btop.1" ]; then
+		cp "$build_dir/btop.1" /artifacts/btop.1
+	fi
+fi
