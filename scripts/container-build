@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 
 engine=${CONTAINER_ENGINE:-podman}
 image=${BTOP_BUILD_IMAGE:-btop-build:local}
+artifact_dir=${BTOP_ARTIFACT_DIR:-$(pwd)/bin}
+
+mkdir -p "$artifact_dir"
 
 "$engine" build --file Containerfile --tag "$image" .
-"$engine" run --rm "$image" "$@"
+"$engine" run --rm --volume "$artifact_dir:/artifacts" "$image" "$@"

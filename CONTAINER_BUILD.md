@@ -33,6 +33,12 @@ pseudo-terminal and inspects completed terminal frames at 36×6, 80×24, and
 160×40, including interface editing and process-filter interaction. A local
 CMake build registers this test when Python and pyte are available.
 
+`make container` runs the same build and exports the executable and generated man page to `bin/btop` and `btop.1`.
+`make container-install` runs that build and then uses the repository Makefile's
+existing `install` target. `PREFIX` defaults to `/usr/local`, so the executable
+is installed as `/usr/local/bin/btop`; use `sudo make container-install` when
+that prefix requires elevated permissions.
+
 These are native Linux builds. Building the macOS and BSD collectors requires
 the corresponding platform SDKs, headers, and libraries; the Linux container
 does not provide them. No remote Actions runs or publication are performed by
