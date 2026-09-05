@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+
+set -eu
+
+cd "$(dirname "$0")/.."
+
+engine=${CONTAINER_ENGINE:-podman}
+image=${BTOP_BUILD_IMAGE:-btop-build:local}
+
+"$engine" build --file Containerfile --tag "$image" .
+"$engine" run --rm "$image" "$@"

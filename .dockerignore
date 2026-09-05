@@ -1,0 +1,11 @@
+.git
+.gitignore
+
+build
+build-*
+cmake-build-*
+obj
+
+btop
+compile_commands.json
+Containerfile

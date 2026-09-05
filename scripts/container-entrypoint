@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+
+set -eu
+
+build_dir=${BTOP_BUILD_DIR:-/build}
+build_type=${BTOP_BUILD_TYPE:-Debug}
+parallel=${BTOP_BUILD_JOBS:-}
+
+cmake \
+	-S /src \
+	-B "$build_dir" \
+	-G Ninja \
+	-DCMAKE_BUILD_TYPE="$build_type" \
+	-DBUILD_TESTING=ON \
+	-DCMAKE_C_FLAGS="-D_GNU_SOURCE" \
+	"$@"
+
+if [ -n "$parallel" ]; then
+	cmake --build "$build_dir" --verbose --parallel "$parallel"
+else
+	cmake --build "$build_dir" --verbose
+fi
+
+ctest --test-dir "$build_dir" --output-on-failure
