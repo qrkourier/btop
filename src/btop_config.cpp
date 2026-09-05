@@ -242,6 +242,16 @@ namespace Config {
 
 		{"net_iface", 			"#* Starts with the Network Interface specified here."},
 
+		{"iface_include", 		"#* Case-sensitive POSIX extended regular expression searched in interface names. Empty includes all."},
+
+		{"iface_exclude", 		"#* Case-sensitive POSIX extended regular expression searched in interface names. Empty excludes none."},
+
+		{"iface_view", 			"#* Network interface view: \"detail\" or \"compact\"."},
+
+		{"iface_sorting", 		"#* Network interface sorting: \"total\", \"speed\" or \"alnum\"."},
+
+		{"iface_reversed", 		"#* Reverse network interface sorting order."},
+
 	    {"base_10_bitrate",     "#* \"True\" shows bitrates in base 10 (Kbps, Mbps). \"False\" shows bitrates in binary sizes (Kibps, Mibps, etc.). \"Auto\" uses base_10_sizes."},
 
 		{"show_battery", 		"#* Show battery stats in top right if battery is present."},
@@ -296,6 +306,10 @@ namespace Config {
 		{"disks_filter", ""},
 		{"io_graph_speeds", ""},
 		{"net_iface", ""},
+		{"iface_include", ""},
+		{"iface_exclude", ""},
+		{"iface_view", "detail"},
+		{"iface_sorting", "total"},
 		{"base_10_bitrate", "Auto"},
 		{"log_level", "WARNING"},
 		{"proc_filter", ""},
@@ -353,6 +367,7 @@ namespace Config {
 		{"io_graph_combined", false},
 		{"net_auto", true},
 		{"net_sync", true},
+		{"iface_reversed", false},
 		{"show_battery", true},
 		{"show_battery_watts", true},
 		{"vim_keys", false},
@@ -606,6 +621,12 @@ namespace Config {
 
 		else if (name.starts_with("graph_symbol_") and (value != "default" and not v_contains(valid_graph_symbols, value)))
 			validError = fmt::format("Invalid graph symbol identifier for {}: {}", name, value);
+
+		else if (name == "iface_view" and not is_in(value, "detail", "compact"))
+			validError = "Invalid iface_view: " + value;
+
+		else if (name == "iface_sorting" and not is_in(value, "total", "speed", "alnum"))
+			validError = "Invalid iface_sorting: " + value;
 
 		else if (name == "shown_boxes" and not Global::init_conf) {
 			if (value.empty())

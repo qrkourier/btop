@@ -139,3 +139,21 @@ namespace Proc {
 	extern std::unordered_map<size_t, Draw::Graph> p_graphs;
 	extern std::unordered_map<size_t, int> p_counters;
 }
+
+namespace Net {
+	struct interface_editor {
+		bool active{};
+		int field{};
+		std::array<Draw::TextEdit, 2> drafts;
+		std::array<bool, 2> invalid{};
+		void open();
+		bool command(std::string_view key);
+	};
+	extern interface_editor filter_editor;
+	struct editor_layout {
+		int left, top, width, height;
+		int include_row, exclude_row, message_row;
+	};
+	editor_layout filter_editor_layout(int width, int height);
+	string draw_filter_editor();
+}

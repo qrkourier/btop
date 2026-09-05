@@ -885,7 +885,6 @@ namespace Net {
 
 	auto collect(bool no_update) -> net_info & {
 		auto &net = current_net;
-		auto &config_iface = Config::getS("net_iface");
 		auto net_sync = Config::getB("net_sync");
 		auto net_auto = Config::getB("net_auto");
 		auto new_timestamp = time_ms();
@@ -1026,36 +1025,20 @@ namespace Net {
 			timestamp = new_timestamp;
 		}
 		//? Return empty net_info struct if no interfaces was found
-		if (net.empty())
+		if (net.empty()) {
+			rebuild_interfaces(net);
 			return empty_net;
+		}
 
 		//? Find an interface to display if selected isn't set or valid
-		if (selected_iface.empty() or not v_contains(interfaces, selected_iface)) {
+		const auto old_iface = selected_iface;
+		rebuild_interfaces(net);
+		if (selected_iface != old_iface) {
 			max_count["download"][0] = max_count["download"][1] = max_count["upload"][0] = max_count["upload"][1] = 0;
 			redraw = true;
 			if (net_auto) rescale = true;
-			if (not config_iface.empty() and v_contains(interfaces, config_iface))
-				selected_iface = config_iface;
-			else {
-				//? Sort interfaces by total upload + download bytes
-				auto sorted_interfaces = interfaces;
-				rng::sort(sorted_interfaces, [&](const auto &a, const auto &b) {
-					return cmp_greater(net.at(a).stat["download"].total + net.at(a).stat["upload"].total,
-									   net.at(b).stat["download"].total + net.at(b).stat["upload"].total);
-				});
-				selected_iface.clear();
-				//? Try to set to a connected interface
-				for (const auto &iface : sorted_interfaces) {
-					if (net.at(iface).connected) selected_iface = iface;
-					break;
-				}
-				//? If no interface is connected set to first available
-				if (selected_iface.empty() and not sorted_interfaces.empty())
-					selected_iface = sorted_interfaces.at(0);
-				else if (sorted_interfaces.empty())
-					return empty_net;
-			}
 		}
+		if (selected_iface.empty()) return empty_net;
 
 		//? Calculate max scale for graphs if needed
 		if (net_auto) {
