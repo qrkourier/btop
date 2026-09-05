@@ -20,6 +20,8 @@ namespace Cli {
 		bool debug {};
 		// Set an initial process filter.
 		std::optional<std::string> filter;
+		// Prefer an exact network interface name at startup and after disappearance.
+		std::optional<std::string> iface;
 		// Only use ANSI supported graph symbols and colors
 		std::optional<bool> force_tty;
 		// Use UTF-8 locale even if not detected

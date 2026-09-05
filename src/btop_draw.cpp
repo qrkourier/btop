@@ -1495,9 +1495,35 @@ namespace Net {
 	string old_ip;
 	std::unordered_map<string, Draw::Graph> graphs;
 	string box;
+	static compact_scale compact_page_scale;
+	static std::unordered_map<int, Draw::Meter> down_meters, up_meters;
+
+	editor_layout filter_editor_layout(int width, int height) {
+		const int w = min(70, width - 2), h = min(8, height);
+		const int left = max(1, (width - w) / 2), top = max(1, (height - h) / 2);
+		return {left, top, w, h, top + 2, top + (h < 8 ? 3 : 4), top + h - 2};
+	}
+
+	string draw_filter_editor() {
+		const auto layout = filter_editor_layout(Term::width, Term::height);
+		string out = Draw::createBox(layout.left, layout.top, layout.width, layout.height, Theme::c("net_box"), true, "Interface filters (POSIX ERE)");
+		for (int i = 0; i < 2; i++) {
+			const int row = i == 0 ? layout.include_row : layout.exclude_row;
+			fmt::format_to(std::back_inserter(out), "{}{}{}{}", Mv::to(row, layout.left + 2), Theme::c("title"), i == 0 ? "Include: " : "Exclude: ",
+				filter_editor.field == i ? filter_editor.drafts[i](layout.width - 13) : uresize(filter_editor.drafts[i].text, layout.width - 13));
+		}
+		string message = "Tab: field  Enter: apply  Esc: cancel";
+		if (filter_editor.invalid[0] or filter_editor.invalid[1])
+			message = fmt::format("Invalid: {}{}", filter_editor.invalid[0] ? "include " : "", filter_editor.invalid[1] ? "exclude" : "");
+		return fmt::format("{}{}{}{}{}", out, Mv::to(layout.message_row, layout.left + 2), Theme::c("hi_fg"), uresize(message, layout.width - 4), Fx::reset);
+	}
 
 	string draw(const net_info& net, bool force_redraw, bool data_same) {
 		if (Runner::stopping) return "";
+		if (not compact_view_initialized) {
+			iface_compact_view_active = Config::getS("iface_view") == "compact";
+			compact_view_initialized = true;
+		}
 		if (force_redraw) redraw = true;
 		auto net_sync = Config::getB("net_sync");
 		auto net_auto = Config::getB("net_auto");
@@ -1514,28 +1540,16 @@ namespace Net {
 		const string title_left = Theme::c("net_box") + Fx::ub + Symbols::title_left;
 		const string title_right = Theme::c("net_box") + Fx::ub + Symbols::title_right;
 		const int i_size = min((int)selected_iface.size(), MAX_IFNAMSIZ);
-		const long long down_max = (net_auto ? safeVal(graph_max, "download"s) : ((long long)(Config::getI("net_download")) << 20) / 8);
-		const long long up_max = (net_auto ? safeVal(graph_max, "upload"s) : ((long long)(Config::getI("net_upload")) << 20) / 8);
+		const auto fixed_limits = fixed_net_limits();
+		const long long down_max = (net_auto ? safeVal(graph_max, "download"s) : (long long)fixed_limits.download);
+		const long long up_max = (net_auto ? safeVal(graph_max, "upload"s) : (long long)fixed_limits.upload);
+		const bool show_ip = not ip_addr.empty() and cmp_greater(width - i_size - 36, ip_addr.size());
 
-		//* Redraw elements not needed to be updated every cycle
-		if (redraw) {
-			out = box;
-			//? Graphs
-			graphs.clear();
-			if (safeVal(net.bandwidth, "download"s).empty() or safeVal(net.bandwidth, "upload"s).empty())
-				return out + Fx::reset;
-
-			graphs["download"] = Draw::Graph{
-				width - b_width - 2, u_graph_height, "download",
-				net.bandwidth.at("download"), graph_symbol,
-				swap_upload_download, true, down_max};
-			graphs["upload"] = Draw::Graph{
-				width - b_width - 2, d_graph_height, "upload",
-				net.bandwidth.at("upload"), graph_symbol, !swap_upload_download, true, up_max};
-
+		const auto draw_controls = [&]() {
+			string controls;
 			//? Interface selector and buttons
 
-			out += Mv::to(y, x+width - i_size - 9) + title_left + Fx::b + Theme::c("hi_fg") + Symbols::left + "b " + Theme::c("title")
+			controls += Mv::to(y, x+width - i_size - 9) + title_left + Fx::b + Theme::c("hi_fg") + Symbols::left + "b " + Theme::c("title")
 				+ uresize(selected_iface, MAX_IFNAMSIZ) + Theme::c("hi_fg") + " n" + Symbols::right + title_right
 				+ Mv::to(y, x+width - i_size - 15) + title_left + Theme::c("hi_fg") + (safeVal(net.stat, "download"s).offset + safeVal(net.stat, "upload"s).offset > 0 ? Fx::b : "") + 'z'
 				+ Theme::c("title") + "ero" + title_right;
@@ -1543,18 +1557,120 @@ namespace Net {
 			Input::mouse_mappings["n"] = {y, x+width - 6, 1, 3};
 			Input::mouse_mappings["z"] = {y, x+width - i_size - 14, 1, 4};
 			if (width - i_size - 20 > 6) {
-				out += Mv::to(y, x+width - i_size - 21) + title_left + Theme::c("hi_fg") + (net_auto ? Fx::b : "") + 'a' + Theme::c("title") + "uto" + title_right;
+				controls += Mv::to(y, x+width - i_size - 21) + title_left + Theme::c("hi_fg") + (net_auto ? Fx::b : "") + 'a' + Theme::c("title") + "uto" + title_right;
 				Input::mouse_mappings["a"] = {y, x+width - i_size - 20, 1, 4};
 			}
 			if (width - i_size - 20 > 13) {
-				out += Mv::to(y, x+width - i_size - 27) + title_left + Theme::c("title") + (net_sync ? Fx::b : "") + 's' + Theme::c("hi_fg")
+				controls += Mv::to(y, x+width - i_size - 27) + title_left + Theme::c("title") + (net_sync ? Fx::b : "") + 's' + Theme::c("hi_fg")
 					+ 'y' + Theme::c("title") + "nc" + title_right;
 				Input::mouse_mappings["y"] = {y, x+width - i_size - 26, 1, 4};
 			}
+			return controls;
+		};
+
+		string hints;
+		hints += Mv::to(y + height - 1, x + width - 10) + Theme::c("hi_fg") + "I";
+		Input::mouse_mappings["I"] = {y + height - 1, x + width - 10, 1, 1};
+		Input::mouse_mappings.erase("clear_iface");
+		if (delete_target() == filter_target::iface) {
+			hints += " del";
+			Input::mouse_mappings["clear_iface"] = {y + height - 1, x + width - 8, 1, 3};
+		}
+
+		if (selected_iface.empty()) {
+			const auto recovery_iface = explicit_iface.value_or(Config::getS("net_iface"));
+			const auto message = explicit_unavailable and not recovery_iface.empty()
+				? fmt::format("Interface \"{}\" is unavailable", recovery_iface)
+				: "No interfaces match include/exclude patterns — I to edit"s;
+			compact_page_scale.change_page(-1);
+			out = box + hints + draw_controls();
+			const int message_width = max(1, width - b_width - 2);
+			string remaining = message;
+			for (int row = 0; row < height - 2 and not remaining.empty(); row++) {
+				const auto line = uresize(remaining, message_width);
+				fmt::format_to(std::back_inserter(out), "{}{}{}", Mv::to(y + 1 + row, x + 1), Theme::c("main_fg"), line);
+				remaining.erase(0, line.size());
+			}
+			redraw = false;
+			return out + Fx::reset;
+		}
+
+		if (iface_compact_view_active) {
+			string compact = box;
+			const int selected = iface_index;
+			const auto layout = compact_layout(width - b_width, height, confirmed_interfaces.size(), selected);
+			set_page_size(layout.per_page);
+			auto& scale = compact_page_scale;
+			if (data_same) scale.change_page(layout.page);
+			const auto page_sample = compact_page_sample(confirmed_interfaces, current_net, layout.first, layout.per_page);
+			const auto ceiling = net_auto and not data_same ? scale.update(page_sample, layout.page) : scale.ceiling;
+			if (not down_meters.contains(layout.meter_width)) {
+				down_meters.emplace(layout.meter_width, Draw::Meter{layout.meter_width, "download"});
+				up_meters.emplace(layout.meter_width, Draw::Meter{layout.meter_width, "upload"});
+			}
+			auto& down_meter = down_meters.at(layout.meter_width);
+			auto& up_meter = up_meters.at(layout.meter_width);
+			for (int slot = 0; slot < layout.per_page and layout.first + slot < (int)confirmed_interfaces.size(); slot++) {
+				const auto& name = confirmed_interfaces[layout.first + slot];
+				const auto info_it = current_net.find(name);
+				if (info_it == current_net.end()) continue;
+				const auto tile = compact_tile(name, info_it->second, layout.tile_width,
+					net_auto ? ceiling : down_max, net_auto ? ceiling : up_max);
+				const int tx = x + 1 + (slot % layout.columns) * layout.tile_width;
+				const int ty = y + 1 + (slot / layout.columns) * 3;
+				fmt::format_to(std::back_inserter(compact), "{}{}{}{}{}", Mv::to(ty, tx),
+					name == selected_iface ? Theme::c("selected_bg") + Theme::c("selected_fg") + Fx::b : Theme::c("title"),
+					name == selected_iface ? ">" : " ", tile.name, Fx::reset);
+				const auto meter_row = [&](int row, const string& symbol, Draw::Meter& meter, int percent, uint64_t speed) {
+					return fmt::format("{}{}{}{}{}", Mv::to(row, tx), Theme::c("main_fg"), symbol, meter(percent),
+						tile.show_speeds ? " " + uresize(floating_humanizer(speed, false, 0, false, true), 7) : "");
+				};
+				compact += meter_row(ty + 1, "▼", down_meter, tile.download_percent, tile.download_speed);
+				compact += meter_row(ty + 2, "▲", up_meter, tile.upload_percent, tile.upload_speed);
+			}
+			const string scale_text = net_auto ? floating_humanizer(ceiling, false, 0, false, true)
+				: "D " + floating_humanizer(down_max, false, 0, false, true) + " U " + floating_humanizer(up_max, false, 0, false, true);
+			const string page_text = fmt::format("page {}/{} {} {}", layout.page + 1,
+				max(1, ((int)confirmed_interfaces.size() + layout.per_page - 1) / layout.per_page),
+				Config::getS("iface_sorting"), scale_text);
+			const int header_start = show_ip ? x + 10 + ulen(ip_addr) : x + 8;
+			int header_end = x + width - i_size - 15;
+			if (width - i_size - 20 > 6)
+				header_end = min(header_end, x + width - i_size - 21);
+			if (width - i_size - 20 > 13)
+				header_end = min(header_end, x + width - i_size - 27);
+			if (header_end - header_start >= 8)
+				compact += Mv::to(y, header_start) + Theme::c("title") + uresize(page_text, header_end - header_start);
+			else
+				compact += Mv::to(y + height - 1, x + 2) + Theme::c("title")
+					+ uresize(page_text, max(0, width - 12));
+			out = compact;
+			redraw = true;
+		}
+
+		//* Redraw elements not needed to be updated every cycle
+		if (redraw) {
+			if (not iface_compact_view_active) out = box;
+			//? Graphs
+			if (not iface_compact_view_active) {
+				graphs.clear();
+				if (safeVal(net.bandwidth, "download"s).empty() or safeVal(net.bandwidth, "upload"s).empty())
+					return out + Fx::reset;
+
+				graphs["download"] = Draw::Graph{
+					width - b_width - 2, u_graph_height, "download",
+					net.bandwidth.at("download"), graph_symbol,
+					swap_upload_download, true, down_max};
+				graphs["upload"] = Draw::Graph{
+					width - b_width - 2, d_graph_height, "upload",
+					net.bandwidth.at("upload"), graph_symbol, !swap_upload_download, true, up_max};
+
+			}
+			out += draw_controls();
 		}
 
 		//? IP or device address
-		if (not ip_addr.empty() and cmp_greater(width - i_size - 36, ip_addr.size())) {
+		if (show_ip) {
 			out += Mv::to(y, x + 8) + title_left + Theme::c("title") + Fx::b + ip_addr + title_right;
 		}
 
@@ -1569,7 +1685,7 @@ namespace Net {
 			} else {
 				out += Mv::to(y + u_graph_height + 1 + ((height * swap_upload_download) % 2), x + 1);
 			}
-			out += graphs.at(dir)(safeVal(net.bandwidth, dir), redraw or data_same or not net.connected)
+			if (not iface_compact_view_active) out += graphs.at(dir)(safeVal(net.bandwidth, dir), redraw or data_same or not net.connected)
 				+ Mv::to(y+1 + (((dir == "upload") == (!swap_upload_download)) * (height - 3)), x + 1) + Fx::ub + Theme::c("graph_text")
 				+ floating_humanizer((dir == "upload" ? up_max : down_max), true);
 			const string speed = floating_humanizer(safeVal(net.stat, dir).speed, false, 0, false, true);
@@ -1595,7 +1711,7 @@ namespace Net {
 		}
 
 		redraw = false;
-		return out + Fx::reset;
+		return out + hints + Fx::reset;
 	}
 
 }
@@ -1901,15 +2017,15 @@ namespace Proc {
 			const auto filter_text = (filtering) ? filter(max(6, width - 66)) : uresize(Config::getS("proc_filter"), max(6, width - 66));
 			out += Mv::to(y, x+9) + title_left + (not filter_text.empty() ? Fx::b : "") + Theme::c("hi_fg") + 'f'
 				+ Theme::c("title") + (not filter_text.empty() ? ' ' + filter_text : "ilter")
-				+ (not filtering and not filter_text.empty() ? Theme::c("hi_fg") + " del" : "")
+				+ (not filtering and Net::delete_target() == Net::filter_target::proc ? Theme::c("hi_fg") + " del" : "")
 				+ (filtering ? Theme::c("hi_fg") + ' ' + Symbols::enter : "") + Fx::ub + title_right;
 			if (not filtering) {
 				int f_len = (filter_text.empty() ? 6 : ulen(filter_text) + 2);
 				Input::mouse_mappings["f"] = {y, x + 10, 1, f_len};
-				if (filter_text.empty() and Input::mouse_mappings.contains("delete"))
-					Input::mouse_mappings.erase("delete");
-				else if (not filter_text.empty())
-					Input::mouse_mappings["delete"] = {y, x + 11 + f_len, 1, 3};
+				if (Net::delete_target() != Net::filter_target::proc)
+					Input::mouse_mappings.erase("clear_proc");
+				else
+					Input::mouse_mappings["clear_proc"] = {y, x + 11 + f_len, 1, 3};
 			}
 
 			//? pause, per-core, reverse, tree and sorting
@@ -2257,6 +2373,9 @@ namespace Draw {
 
 		Mem::box.clear();
 		Net::box.clear();
+		// Meter strings cache theme colors, so invalidate on layout/theme rebuilds.
+		Net::down_meters.clear();
+		Net::up_meters.clear();
 		Proc::box.clear();
 		Global::clock.clear();
 		Global::overlay.clear();

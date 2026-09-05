@@ -932,6 +932,8 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 
 	//? Config init
 	init_config(cli.low_color, cli.filter);
+	Net::explicit_iface = cli.iface;
+	Net::normalize_filters();
 
 	//? Try to find and set a UTF-8 locale
 	if (std::setlocale(LC_ALL, "") != nullptr and not std::string_view { std::setlocale(LC_ALL, "") }.contains(";")
@@ -1035,6 +1037,19 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 		clean_quit(1);
 	}
 
+	// Explicit interface selection is validated against the unfiltered inventory,
+	// even when the active layout does not contain the NET box.
+	const auto startup_iface = cli.iface.value_or(Config::getS("net_iface"));
+	if (cli.iface.has_value() or not startup_iface.empty()) {
+		Net::collect(false);
+		if (not Net::has_interface(startup_iface)) {
+			Global::exit_error_msg = fmt::format("Interface \"{}\" not found", startup_iface);
+			Logger::error("{}", Global::exit_error_msg);
+			fmt::println(stderr, "{}", Global::exit_error_msg);
+			clean_quit(1);
+		}
+	}
+
 	if (not Config::set_boxes(Config::getS("shown_boxes"))) {
 		Config::set_boxes("cpu mem net proc");
 		Config::set("shown_boxes", "cpu mem net proc"s);
@@ -1124,6 +1139,8 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 				if (Runner::active) Runner::stop();
 				Config::unlock();
 				init_config(cli.low_color, cli.filter);
+				Net::explicit_iface = cli.iface;
+				Net::normalize_filters();
 				Theme::updateThemes();
 				Theme::setTheme();
 				Draw::banner_gen(0, 0, false, true);

@@ -133,6 +133,14 @@ namespace Cli {
 				cli.filter = std::make_optional(arg);
 				continue;
 			}
+			if (arg == "--iface") {
+				if (++it == args.end()) {
+					error("Interface requires an argument");
+					return std::unexpected { 1 };
+				}
+				cli.iface = std::make_optional(*it);
+				continue;
+			}
 			if (arg == "-p" || arg == "--preset") {
 				// This flag requires an argument.
 				if (++it == args.end()) {
@@ -252,6 +260,7 @@ namespace Cli {
 			"  {2}-c, --config{1} <file>     Path to a config file\n"
 			"  {2}-d, --debug{1}             Start in debug mode with additional logs and metrics\n"
 			"  {2}-f, --filter{1} <filter>   Set an initial process filter\n"
+			"  {2}    --iface{1} <name>      Start with the exact network interface name\n"
 			"  {2}    --force-utf{1}         Override automatic UTF locale detection\n"
 			"  {2}-l, --low-color{1}         Disable true color, 256 colors only\n"
 			"  {2}-p, --preset{1} <id>       Start with a preset (0-9)\n"

@@ -171,6 +171,16 @@ namespace Input {
 					catch (const std::out_of_range&) { mouse_event.clear(); }
 
 					key = mouse_event;
+					if (Net::filter_editor.active) {
+						if (mouse_event != "mouse_click") return "";
+						const auto layout = Net::filter_editor_layout(Term::width, Term::height);
+						const auto& [col, line] = mouse_pos;
+						if (col < layout.left or col >= layout.left + layout.width or line < layout.top or line >= layout.top + layout.height) return "mouse_click";
+						if (line == layout.include_row) return "iface_include_field";
+						if (line == layout.exclude_row) return "iface_exclude_field";
+						return "";
+					}
+
 
 					if (key == "mouse_click" or key == "mouse_drag") {
 						const auto& [col, line] = mouse_pos;
@@ -218,6 +228,53 @@ namespace Input {
 			auto vim_keys = Config::getB("vim_keys");
 			auto help_key = (vim_keys ? "H" : "h");
 			auto kill_key = (vim_keys ? "K" : "k");
+			if (Net::filter_editor.active) {
+				atomic_wait(Runner::active);
+				Config::unlock();
+				if (key == "iface_include_field") Net::filter_editor.field = 0;
+				else if (key == "iface_exclude_field") Net::filter_editor.field = 1;
+				else Net::filter_editor.command(key);
+				Global::overlay = Net::filter_editor.active ? Net::draw_filter_editor() : "";
+				Runner::run("all", true, true);
+				return;
+			}
+			if (not filtering and key == "I" and Net::shown) {
+				atomic_wait(Runner::active);
+				Config::unlock();
+				Net::filter_editor.open();
+				Global::overlay = Net::draw_filter_editor();
+				Runner::run("all", true, true);
+				return;
+			}
+			if (not filtering and is_in(key, "delete", "clear_proc", "clear_iface")) {
+				atomic_wait(Runner::active);
+				Config::unlock();
+				Net::clear_filter(key == "clear_proc" ? Net::filter_target::proc : key == "clear_iface" ? Net::filter_target::iface : Net::delete_target());
+				Runner::run("all", true, true);
+				return;
+			}
+			if (not filtering and Net::shown and Net::iface_compact_view_active and key == "enter") {
+				atomic_wait(Runner::active);
+				if (not Net::selected_iface.empty()) Net::iface_compact_view_active = false;
+				Runner::run("net", true, true);
+				return;
+			}
+			if (not filtering and Net::shown and is_in(key, "n", "b", "S", "R")) {
+				atomic_wait(Runner::active);
+				Config::unlock();
+				if (key == "S") {
+					const auto& sorting = Config::getS("iface_sorting");
+					Config::set("iface_sorting", sorting == "total" ? "speed"s : sorting == "speed" ? "alnum"s : "total"s);
+					Net::rebuild_interfaces(Net::current_net);
+				}
+				else if (key == "R") {
+					Config::flip("iface_reversed");
+					Net::rebuild_interfaces(Net::current_net);
+				}
+				else Net::navigate_interface(key == "b" ? -1 : 1);
+				Runner::run("net", true, true);
+				return;
+			}
 			//? Global input actions
 			if (not filtering) {
 				bool keep_going = false;
@@ -301,6 +358,7 @@ namespace Input {
 				if (filtering) {
 					if (key == "enter" or key == "down") {
 						Config::set("proc_filter", Proc::filter.text);
+						Net::clear_owner = Net::filter_target::proc;
 						Config::set("proc_filtering", false);
 						old_filter.clear();
 						if(key == "down"){
@@ -533,7 +591,7 @@ namespace Input {
 
 				if (not keep_going) {
 					Runner::run("proc", no_update, redraw);
-					Runner::run("cpu", no_update, redraw);
+					if (Cpu::shown) Runner::run("cpu", no_update, redraw);
 					return;
 				}
 			}
@@ -597,21 +655,7 @@ namespace Input {
 				bool no_update = true;
 				bool redraw = true;
 
-				if (is_in(key, "b", "n")) {
-					atomic_wait(Runner::active);
-					int c_index = v_index(Net::interfaces, Net::selected_iface);
-					if (c_index != (int)Net::interfaces.size()) {
-						if (key == "b") {
-							if (--c_index < 0) c_index = Net::interfaces.size() - 1;
-						}
-						else if (key == "n") {
-							if (++c_index == (int)Net::interfaces.size()) c_index = 0;
-						}
-						Net::selected_iface = Net::interfaces.at(c_index);
-						Net::rescale = true;
-					}
-				}
-				else if (key == "y") {
+				if (key == "y") {
 					Config::flip("net_sync");
 					Net::rescale = true;
 				}
@@ -619,7 +663,7 @@ namespace Input {
 					Config::flip("net_auto");
 					Net::rescale = true;
 				}
-				else if (key == "z") {
+				else if (key == "z" and not Net::selected_iface.empty()) {
 					atomic_wait(Runner::active);
 					auto& ndev = Net::current_net.at(Net::selected_iface);
 					if (ndev.stat.at("download").offset + ndev.stat.at("upload").offset > 0) {

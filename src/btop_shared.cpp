@@ -17,6 +17,7 @@ tab-size = 4
 */
 
 #include <sys/resource.h>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
@@ -25,12 +26,290 @@ tab-size = 4
 #include <unordered_set>
 
 #include "btop_config.hpp"
+#include "btop_draw.hpp"
+#include "btop_log.hpp"
 #include "btop_shared.hpp"
 #include "btop_tools.hpp"
 
 namespace fs = std::filesystem;
 namespace rng = std::ranges;
 using namespace Tools;
+
+namespace Net {
+	std::optional<string> explicit_iface;
+	bool explicit_unavailable{};
+	vector<string> confirmed_interfaces;
+	int iface_index{}, iface_page{};
+	static int iface_page_size = 1;
+	bool iface_compact_view_active{};
+	bool compact_view_initialized{};
+	static std::optional<std::regex> include_re;
+	static std::optional<std::regex> exclude_re;
+	static string compiled_include;
+	static string compiled_exclude;
+	static bool explicit_seen{};
+	static string recovery_name;
+
+	filter_target clear_owner = filter_target::proc;
+	interface_editor filter_editor;
+
+	filter_target delete_target() {
+		const bool proc = not Config::getS("proc_filter").empty();
+		const bool iface = not Config::getS("iface_include").empty() or not Config::getS("iface_exclude").empty();
+		if (proc and iface) return clear_owner;
+		return proc ? filter_target::proc : iface ? filter_target::iface : filter_target::none;
+	}
+
+	void clear_filter(filter_target target) {
+		if (target == filter_target::proc) Config::set("proc_filter", ""s);
+		else if (target == filter_target::iface) {
+			Config::set("iface_include", ""s);
+			Config::set("iface_exclude", ""s);
+			rebuild_interfaces(current_net);
+		}
+	}
+
+	void interface_editor::open() {
+		drafts = {Draw::TextEdit{Config::getS("iface_include")}, Draw::TextEdit{Config::getS("iface_exclude")}};
+		invalid = {};
+		field = 0;
+		active = true;
+	}
+
+	bool interface_editor::command(std::string_view key) {
+		if (key == "escape" or key == "mouse_click") active = false;
+		else if (key == "tab" or key == "shift_tab") field = 1 - field;
+		else if (key == "enter") {
+			invalid = {};
+			for (int i = 0; i < 2; i++) {
+				try { if (not drafts[i].text.empty()) std::regex pattern(drafts[i].text, std::regex::extended); }
+				catch (const std::regex_error&) { invalid[i] = true; }
+			}
+			if (invalid[0] or invalid[1]) return false;
+			Config::set("iface_include", drafts[0].text);
+			Config::set("iface_exclude", drafts[1].text);
+			explicit_seen = false;
+			rebuild_interfaces(current_net);
+			iface_compact_view_active = true;
+			compact_view_initialized = true;
+			clear_owner = filter_target::iface;
+			active = false;
+			return true;
+		}
+		else if (key != "delete") drafts[field].command(key);
+		return false;
+	}
+
+	static bool natural_less(const string& left, const string& right) {
+		size_t left_pos = 0, right_pos = 0;
+		// Compare digit spans without integer conversion, allowing arbitrarily long names.
+		while (left_pos < left.size() and right_pos < right.size()) {
+			if (std::isdigit(static_cast<unsigned char>(left[left_pos])) and std::isdigit(static_cast<unsigned char>(right[right_pos]))) {
+				while (left_pos < left.size() and left[left_pos] == '0') left_pos++;
+				while (right_pos < right.size() and right[right_pos] == '0') right_pos++;
+				auto left_end = left_pos, right_end = right_pos;
+				while (left_end < left.size() and std::isdigit(static_cast<unsigned char>(left[left_end]))) left_end++;
+				while (right_end < right.size() and std::isdigit(static_cast<unsigned char>(right[right_end]))) right_end++;
+				if (left_end - left_pos != right_end - right_pos) return left_end - left_pos < right_end - right_pos;
+				if (auto cmp = left.substr(left_pos, left_end-left_pos).compare(right.substr(right_pos, right_end-right_pos)); cmp != 0) return cmp < 0;
+				left_pos = left_end;
+				right_pos = right_end;
+				continue;
+			}
+			if (left[left_pos] != right[right_pos]) return left[left_pos] < right[right_pos];
+			left_pos++; right_pos++;
+		}
+		if (left_pos != left.size() or right_pos != right.size()) return left_pos == left.size();
+		return left < right;
+	}
+
+	static auto compile_pattern(const string& name, string& value) -> std::optional<std::regex> {
+		if (value.empty()) return std::nullopt;
+		try { return std::regex(value, std::regex::extended); }
+		catch (const std::regex_error& e) {
+			Logger::warning("Invalid {} pattern '{}': {}; disabling it", name, value, e.what());
+			Config::set(name, ""s);
+			value.clear();
+			return std::nullopt;
+		}
+	}
+
+	void normalize_filters() {
+		auto include = Config::getS("iface_include");
+		auto exclude = Config::getS("iface_exclude");
+		include_re = compile_pattern("iface_include", include);
+		exclude_re = compile_pattern("iface_exclude", exclude);
+		compiled_include = include;
+		compiled_exclude = exclude;
+	}
+
+	bool has_interface(const string& name) { return v_contains(interfaces, name); }
+
+	uint64_t interface_total(const net_info& info) {
+		return info.stat.at("download").last + info.stat.at("download").rollover
+			+ info.stat.at("upload").last + info.stat.at("upload").rollover;
+	}
+
+	uint64_t interface_speed(const net_info& info) {
+		return info.stat.at("download").speed + info.stat.at("upload").speed;
+	}
+
+	auto fixed_net_limits() -> compact_limits {
+		const auto download = (static_cast<uint64_t>(Config::getI("net_download")) << 20) / 8;
+		const auto upload = (static_cast<uint64_t>(Config::getI("net_upload")) << 20) / 8;
+		return {download, upload};
+	}
+
+	auto reconcile_selection(const vector<string>& confirmed, const string& preferred, const string& selected,
+		bool explicit_seen, bool explicit_unavailable) -> selection_state {
+		selection_state state{selected, 0, explicit_seen, explicit_unavailable};
+		const bool preferred_present = not preferred.empty() and v_contains(confirmed, preferred);
+		if (preferred_present) {
+			if (not state.explicit_seen or state.selected.empty()) state.selected = preferred;
+			state.explicit_seen = true;
+			state.explicit_unavailable = false;
+		}
+		else {
+			state.explicit_seen = false;
+			state.explicit_unavailable = not preferred.empty();
+			if (not preferred.empty()) state.selected.clear();
+		}
+		if (not state.selected.empty() and not v_contains(confirmed, state.selected)) state.selected.clear();
+		if (state.selected.empty() and not state.explicit_unavailable and not confirmed.empty())
+			state.selected = confirmed.front();
+		state.index = state.selected.empty() ? 0 : v_index(confirmed, state.selected);
+		return state;
+	}
+
+	int compact_page(int index, int count, int per_page) {
+		if (count <= 0 or per_page <= 0) return 0;
+		return std::clamp(index, 0, count - 1) / per_page;
+	}
+
+	uint64_t compact_page_sample(const vector<string>& confirmed, const std::unordered_map<string, net_info>& net,
+		int first, int count) {
+		uint64_t sample{};
+		for (int slot = 0; slot < count; slot++) {
+			const int index = first + slot;
+			if (index < 0 or index >= (int)confirmed.size()) break;
+			const auto it = net.find(confirmed.at(index));
+			if (it == net.end()) continue;
+			sample = std::max(sample, std::max(it->second.stat.at("download").speed,
+				it->second.stat.at("upload").speed));
+		}
+		return sample;
+	}
+
+	auto compact_tile(const string& name, const net_info& info, int tile_width,
+		uint64_t download_limit, uint64_t upload_limit) -> compact_tile_info {
+		const auto percent = [](uint64_t speed, uint64_t limit) {
+			return static_cast<int>(std::min(100.0L, 100.0L * speed / std::max<uint64_t>(1, limit)));
+		};
+		return {
+			uresize(name, std::max(0, tile_width - 2)),
+			info.stat.at("download").speed,
+			info.stat.at("upload").speed,
+			percent(info.stat.at("download").speed, download_limit),
+			percent(info.stat.at("upload").speed, upload_limit),
+			tile_width >= 14
+		};
+	}
+
+	auto compact_layout(int width, int height, int count, int selected) -> compact_layout_info {
+		compact_layout_info layout;
+		const int available_width = std::max(1, width - 2);
+		const int available_height = std::max(1, height - 2);
+		layout.columns = std::max(1, available_width / 24);
+		layout.rows = std::max(1, available_height / 3);
+		layout.per_page = layout.columns * layout.rows;
+		layout.page = compact_page(selected, count, layout.per_page);
+		layout.first = layout.page * layout.per_page;
+		layout.tile_width = std::max(1, available_width / layout.columns);
+		layout.meter_width = layout.tile_width < 3 ? 0
+			: std::max(1, layout.tile_width - (layout.tile_width >= 14 ? 10 : 2));
+		return layout;
+	}
+
+	bool compact_scale::change_page(int current_page) {
+		if (page == current_page) return false;
+		page = current_page;
+		low_samples = 0;
+		return true;
+	}
+
+	auto compact_scale::update(uint64_t sample, int current_page) -> uint64_t {
+		const bool page_changed = change_page(current_page);
+		const bool traffic_rose = sample > previous_sample;
+		previous_sample = sample;
+		if (sample >= ceiling) {
+			ceiling = std::max<uint64_t>(10 << 10, sample * 13 / 10);
+			low_samples = 0;
+		}
+		else if (sample < ceiling / 10 and not page_changed and not traffic_rose) {
+			if (++low_samples >= 5) {
+				ceiling = std::max<uint64_t>(10 << 10, sample * 3);
+				low_samples = 0;
+			}
+		}
+		else low_samples = 0;
+		return ceiling;
+	}
+
+	void rebuild_interfaces(std::unordered_map<string, net_info>& net) {
+		const auto& inventory = interfaces;
+		if (compiled_include != Config::getS("iface_include") or compiled_exclude != Config::getS("iface_exclude")) normalize_filters();
+		confirmed_interfaces.clear();
+		for (const auto& name : inventory) {
+			const bool included = not include_re or std::regex_search(name, *include_re);
+			const bool excluded = exclude_re and std::regex_search(name, *exclude_re);
+			if (included and not excluded) confirmed_interfaces.push_back(name);
+		}
+		const auto preferred = explicit_iface.value_or(Config::getS("net_iface"));
+		if (preferred != recovery_name) {
+			recovery_name = preferred;
+			explicit_seen = false;
+			explicit_unavailable = false;
+		}
+		const bool preferred_present = not preferred.empty() and v_contains(inventory, preferred);
+		if (preferred_present and not v_contains(confirmed_interfaces, preferred)) confirmed_interfaces.push_back(preferred);
+
+		const auto sorting = Config::getS("iface_sorting");
+		const auto metric = [&](const string& name) {
+			const auto it = net.find(name);
+			if (it == net.end()) return uint64_t{};
+			return sorting == "speed" ? interface_speed(it->second) : interface_total(it->second);
+		};
+		rng::sort(confirmed_interfaces, [&](const auto& a, const auto& b) {
+			if (sorting != "alnum") {
+				const auto av = metric(a);
+				const auto bv = metric(b);
+				if (av != bv) return av > bv;
+			}
+			return natural_less(a, b);
+		});
+		if (Config::getB("iface_reversed")) rng::reverse(confirmed_interfaces);
+
+		const auto state = reconcile_selection(confirmed_interfaces, preferred, selected_iface, explicit_seen, explicit_unavailable);
+		selected_iface = state.selected;
+		explicit_seen = state.explicit_seen;
+		explicit_unavailable = state.explicit_unavailable;
+		iface_index = state.index;
+		iface_page = compact_page(iface_index, (int)confirmed_interfaces.size(), iface_page_size);
+	}
+
+	void set_page_size(int per_page) {
+		iface_page_size = std::max(1, per_page);
+		iface_page = compact_page(iface_index, (int)confirmed_interfaces.size(), iface_page_size);
+	}
+
+	void navigate_interface(int direction) {
+		if (selected_iface.empty() or confirmed_interfaces.empty()) return;
+		iface_index = (iface_index + direction + confirmed_interfaces.size()) % confirmed_interfaces.size();
+		selected_iface = confirmed_interfaces.at(iface_index);
+		iface_page = compact_page(iface_index, (int)confirmed_interfaces.size(), iface_page_size);
+		rescale = true;
+	}
+}
 
 namespace Cpu {
     std::optional<std::string> container_engine;

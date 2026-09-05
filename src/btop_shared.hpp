@@ -316,6 +316,14 @@ namespace Net {
 	extern string selected_iface;
 	extern vector<string> interfaces;
 	extern bool rescale;
+	extern std::optional<string> explicit_iface;
+	extern bool explicit_unavailable;
+	extern vector<string> confirmed_interfaces;
+	extern int iface_index, iface_page;
+	void navigate_interface(int direction);
+	void set_page_size(int per_page);
+	extern bool iface_compact_view_active;
+	extern bool compact_view_initialized;
 	extern std::unordered_map<string, uint64_t> graph_max;
 
 	struct net_stat {
@@ -334,6 +342,66 @@ namespace Net {
 		string ipv6{};      // defaults to ""
 		bool connected{};
 	};
+
+	struct compact_layout_info {
+		int columns{1};
+		int rows{1};
+		int per_page{1};
+		int page{};
+		int first{};
+		int tile_width{1};
+		int meter_width{};
+	};
+
+	struct compact_scale {
+		uint64_t ceiling{10 << 10};
+		uint64_t previous_sample{};
+		int low_samples{};
+		int page{-1};
+
+		bool change_page(int current_page);
+		auto update(uint64_t sample, int current_page) -> uint64_t;
+	};
+
+	struct compact_tile_info {
+		string name;
+		uint64_t download_speed{};
+		uint64_t upload_speed{};
+		int download_percent{};
+		int upload_percent{};
+		bool show_speeds{};
+	};
+
+	struct compact_limits {
+		uint64_t download{};
+		uint64_t upload{};
+	};
+
+	struct selection_state {
+		string selected;
+		int index{};
+		bool explicit_seen{};
+		bool explicit_unavailable{};
+	};
+
+	uint64_t interface_total(const net_info& info);
+	uint64_t interface_speed(const net_info& info);
+	auto fixed_net_limits() -> compact_limits;
+	auto reconcile_selection(const vector<string>& confirmed, const string& preferred, const string& selected,
+		bool explicit_seen, bool explicit_unavailable) -> selection_state;
+	int compact_page(int index, int count, int per_page);
+	uint64_t compact_page_sample(const vector<string>& confirmed, const std::unordered_map<string, net_info>& net,
+		int first, int count);
+	auto compact_tile(const string& name, const net_info& info, int tile_width,
+		uint64_t download_limit, uint64_t upload_limit) -> compact_tile_info;
+	enum class filter_target { proc, iface, none };
+	extern filter_target clear_owner;
+	filter_target delete_target();
+	void clear_filter(filter_target target);
+	void normalize_filters();
+	void rebuild_interfaces(std::unordered_map<string, net_info>& net);
+	bool has_interface(const string& name);
+	auto compact_layout(int width, int height, int count, int selected) -> compact_layout_info;
 
 	class IfAddrsPtr {
 		struct ifaddrs* ifaddr;
