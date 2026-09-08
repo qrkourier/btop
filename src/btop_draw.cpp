@@ -24,6 +24,7 @@ tab-size = 4
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 
 #include <fmt/format.h>
@@ -1496,7 +1497,10 @@ namespace Net {
 	std::unordered_map<string, Draw::Graph> graphs;
 	string box;
 	static compact_scale compact_page_scale;
-	static std::unordered_map<int, Draw::Meter> down_meters, up_meters;
+	// Per-interface dot graphs, keyed by interface name and direction, mirroring the disks pane io_graphs.
+	static std::unordered_map<string, Draw::Graph> iface_graphs;
+	static int iface_graph_width = -1;
+	static long long iface_graph_down_max = -1, iface_graph_up_max = -1;
 
 	editor_layout filter_editor_layout(int width, int height) {
 		const int w = min(70, width - 2), h = min(8, height);
@@ -1604,12 +1608,15 @@ namespace Net {
 			if (data_same) scale.change_page(layout.page);
 			const auto page_sample = compact_page_sample(confirmed_interfaces, current_net, layout.first, layout.per_page);
 			const auto ceiling = net_auto and not data_same ? scale.update(page_sample, layout.page) : scale.ceiling;
-			if (not down_meters.contains(layout.meter_width)) {
-				down_meters.emplace(layout.meter_width, Draw::Meter{layout.meter_width, "download"});
-				up_meters.emplace(layout.meter_width, Draw::Meter{layout.meter_width, "upload"});
+			const auto dot_down_max = (long long)(net_auto ? ceiling : down_max);
+			const auto dot_up_max = (long long)(net_auto ? ceiling : up_max);
+			if (iface_graph_width != layout.meter_width or iface_graph_down_max != dot_down_max or iface_graph_up_max != dot_up_max) {
+				// Layout or scale changed: rebuild graphs so histories rescale.
+				iface_graphs.clear();
+				iface_graph_width = layout.meter_width;
+				iface_graph_down_max = dot_down_max;
+				iface_graph_up_max = dot_up_max;
 			}
-			auto& down_meter = down_meters.at(layout.meter_width);
-			auto& up_meter = up_meters.at(layout.meter_width);
 			for (int slot = 0; slot < layout.per_page and layout.first + slot < (int)confirmed_interfaces.size(); slot++) {
 				const auto& name = confirmed_interfaces[layout.first + slot];
 				const auto info_it = current_net.find(name);
@@ -1621,13 +1628,32 @@ namespace Net {
 				fmt::format_to(std::back_inserter(compact), "{}{}{}{}{}", Mv::to(ty, tx),
 					name == selected_iface ? Theme::c("selected_bg") + Theme::c("selected_fg") + Fx::b : Theme::c("title"),
 					name == selected_iface ? ">" : " ", tile.name, Fx::reset);
-				const auto meter_row = [&](int row, const string& symbol, Draw::Meter& meter, int percent, uint64_t speed) {
-					return fmt::format("{}{}{}{}{}", Mv::to(row, tx), Theme::c("main_fg"), symbol, meter(percent),
-						tile.show_speeds ? " " + uresize(floating_humanizer(speed, false, 0, false, true), 7) : "");
+				const auto dot_row = [&](int row, const string& dir, const string& symbol, uint64_t speed) {
+					string row_out = fmt::format("{}{}{}", Mv::to(row, tx), Theme::c("main_fg"), symbol);
+					if (layout.meter_width > 0) {
+						const string key = name + '/' + dir;
+						if (not iface_graphs.contains(key)) {
+							iface_graphs.try_emplace(key, layout.meter_width, 1, dir,
+								info_it->second.bandwidth.at(dir), graph_symbol, false, false,
+								dir == "download"s ? dot_down_max : dot_up_max);
+						}
+						row_out += iface_graphs.at(key)(info_it->second.bandwidth.at(dir), data_same);
+					}
+					if (tile.show_speeds)
+						row_out += " " + uresize(floating_humanizer(speed, false, 0, false, true), 7);
+					return row_out;
 				};
-				compact += meter_row(ty + 1, "▼", down_meter, tile.download_percent, tile.download_speed);
-				compact += meter_row(ty + 2, "▲", up_meter, tile.upload_percent, tile.upload_speed);
+				compact += dot_row(ty + 1, "download"s, "▼", tile.download_speed);
+				compact += dot_row(ty + 2, "upload"s, "▲", tile.upload_speed);
 			}
+			std::unordered_set<string> visible_keys;
+			for (int slot = 0; slot < layout.per_page and layout.first + slot < (int)confirmed_interfaces.size(); slot++) {
+				visible_keys.insert(confirmed_interfaces[layout.first + slot] + "/download"s);
+				visible_keys.insert(confirmed_interfaces[layout.first + slot] + "/upload"s);
+			}
+			for (auto it = iface_graphs.begin(); it != iface_graphs.end();)
+				if (not visible_keys.contains(it->first)) it = iface_graphs.erase(it);
+				else ++it;
 			const string scale_text = net_auto ? floating_humanizer(ceiling, false, 0, false, true)
 				: "D " + floating_humanizer(down_max, false, 0, false, true) + " U " + floating_humanizer(up_max, false, 0, false, true);
 			const string page_text = fmt::format("page {}/{} {} {}", layout.page + 1,
@@ -2373,9 +2399,10 @@ namespace Draw {
 
 		Mem::box.clear();
 		Net::box.clear();
-		// Meter strings cache theme colors, so invalidate on layout/theme rebuilds.
-		Net::down_meters.clear();
-		Net::up_meters.clear();
+		// Dot graphs cache theme colors and scale, so invalidate on layout/theme rebuilds.
+		Net::iface_graphs.clear();
+		Net::iface_graph_width = -1;
+		Net::iface_graph_down_max = Net::iface_graph_up_max = -1;
 		Proc::box.clear();
 		Global::clock.clear();
 		Global::overlay.clear();
