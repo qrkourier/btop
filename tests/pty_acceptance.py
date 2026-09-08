@@ -199,7 +199,7 @@ class Acceptance(unittest.TestCase):
     def test_default_config_documents_patterns_and_omits_runtime_state(self):
         result = subprocess.run([BINARY, '--default-config'], capture_output=True, text=True, check=True)
         self.assertIn('POSIX extended regular expression', result.stdout)
-        self.assertIn('Empty includes all', result.stdout)
+        self.assertIn('Empty or .* includes all', result.stdout)
         self.assertIn('Empty excludes none', result.stdout)
         for name in ['iface_compact_view_active', 'confirmed_interfaces', 'iface_index', 'iface_page', 'clear_owner']:
             self.assertNotIn(name + ' =', result.stdout)

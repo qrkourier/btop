@@ -263,6 +263,7 @@ TEST_F(InterfaceModel, PatternMatrixUsesCaseSensitivePosixSearch) {
 	struct Case { string include, exclude; std::vector<string> expected; };
 	const std::vector<Case> cases{
 		{"", "", {"br0", "eth0", "tun0", "veth_mira2", "wlan0"}},
+		{".*", "", {"br0", "eth0", "tun0", "veth_mira2", "wlan0"}},
 		{"eth", "", {"eth0", "veth_mira2"}},
 		{"", "eth", {"br0", "tun0", "wlan0"}},
 		{"eth", "^veth", {"eth0"}},
@@ -550,7 +551,7 @@ TEST_F(InterfaceModel, DeleteOwnershipAndAtomicClearingPreserveOtherFilter) {
 	Net::clear_owner = Net::filter_target::iface;
 	EXPECT_EQ(Net::delete_target(), Net::filter_target::iface);
 	Net::clear_filter(Net::filter_target::iface);
-	EXPECT_TRUE(Config::getS("iface_include").empty());
+	EXPECT_EQ(Config::getS("iface_include"), ".*");
 	EXPECT_TRUE(Config::getS("iface_exclude").empty());
 	EXPECT_EQ(Config::getS("proc_filter"), "btop");
 	EXPECT_EQ(Net::delete_target(), Net::filter_target::proc);
@@ -564,7 +565,7 @@ TEST_F(InterfaceModel, DeleteOwnershipAndAtomicClearingPreserveOtherFilter) {
 TEST(ConfigDocumentation, DocumentsPatternsAndOmitsRuntimeState) {
 	const auto config = Config::current_config();
 	EXPECT_NE(config.find("Case-sensitive POSIX extended regular expression"), string::npos);
-	EXPECT_NE(config.find("Empty includes all"), string::npos);
+	EXPECT_NE(config.find("Empty or .* includes all"), string::npos);
 	EXPECT_NE(config.find("Empty excludes none"), string::npos);
 	for (const auto& name : {"iface_compact_view_active", "confirmed_interfaces", "iface_index", "iface_page", "clear_owner"}) {
 		EXPECT_EQ(config.find(string{name} + " ="), string::npos) << name;
