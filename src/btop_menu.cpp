@@ -793,7 +793,7 @@ namespace Menu {
 				"Will otherwise automatically choose the NIC",
 				"with the highest total download since boot."},
 			{"iface_include",
-				"Interface include pattern.", "", "Case-sensitive POSIX extended regex search.", "Empty includes every interface."},
+				"Interface include pattern.", "", "Case-sensitive POSIX extended regex search.", "The default .* includes every interface."},
 			{"iface_exclude",
 				"Interface exclude pattern.", "", "Case-sensitive POSIX extended regex search.", "Exclusion wins over inclusion."},
 			{"iface_view",

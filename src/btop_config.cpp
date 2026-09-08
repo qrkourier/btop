@@ -242,7 +242,7 @@ namespace Config {
 
 		{"net_iface", 			"#* Starts with the Network Interface specified here."},
 
-		{"iface_include", 		"#* Case-sensitive POSIX extended regular expression searched in interface names. Empty includes all."},
+		{"iface_include", 		"#* Case-sensitive POSIX extended regular expression searched in interface names. Empty or .* includes all."},
 
 		{"iface_exclude", 		"#* Case-sensitive POSIX extended regular expression searched in interface names. Empty excludes none."},
 
@@ -306,7 +306,7 @@ namespace Config {
 		{"disks_filter", ""},
 		{"io_graph_speeds", ""},
 		{"net_iface", ""},
-		{"iface_include", ""},
+		{"iface_include", ".*"},
 		{"iface_exclude", ""},
 		{"iface_view", "detail"},
 		{"iface_sorting", "total"},

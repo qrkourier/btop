@@ -55,7 +55,8 @@ namespace Net {
 
 	filter_target delete_target() {
 		const bool proc = not Config::getS("proc_filter").empty();
-		const bool iface = not Config::getS("iface_include").empty() or not Config::getS("iface_exclude").empty();
+		const auto include = Config::getS("iface_include");
+		const bool iface = (not include.empty() and include != ".*"s) or not Config::getS("iface_exclude").empty();
 		if (proc and iface) return clear_owner;
 		return proc ? filter_target::proc : iface ? filter_target::iface : filter_target::none;
 	}
@@ -63,7 +64,7 @@ namespace Net {
 	void clear_filter(filter_target target) {
 		if (target == filter_target::proc) Config::set("proc_filter", ""s);
 		else if (target == filter_target::iface) {
-			Config::set("iface_include", ""s);
+			Config::set("iface_include", ".*"s);
 			Config::set("iface_exclude", ""s);
 			rebuild_interfaces(current_net);
 		}
