@@ -25,6 +25,9 @@ class Terminal:
         self.directory = tempfile.TemporaryDirectory()
         self.config = pathlib.Path(self.directory.name) / "btop.conf"
         self.config.write_text('update_ms = 100\nclock_format = ""\n' + config)
+        self.start(width, height, args)
+
+    def start(self, width=100, height=30, args=()):
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", height, width, 0, 0))
         self.original = termios.tcgetattr(slave)
@@ -68,6 +71,16 @@ class Terminal:
     def key(self, key):
         os.write(self.master, key.encode())
         return self.read()
+
+    def relaunch(self):
+        self.key("q")
+        self.process.wait(5)
+        if self.process.returncode != 0:
+            raise AssertionError(self.process.stderr.read().decode())
+        os.close(self.master)
+        os.close(self.slave)
+        self.process.stderr.close()
+        self.start()
 
     def close(self):
         if self.process.poll() is None:
@@ -129,6 +142,82 @@ class Acceptance(unittest.TestCase):
                 terminal.key('q')
                 terminal.process.wait(5)
                 self.assertEqual(terminal.process.returncode, 0)
+
+    def assert_view(self, terminal, view):
+        if view == "compact":
+            terminal.wait_for('page 1/')
+        else:
+            terminal.wait_for('compact')
+            self.assertNotIn('page 1/', terminal.read())
+
+    def test_last_view_is_restored(self):
+        for initial, final in [('detail', 'compact'), ('compact', 'detail')]:
+            with self.subTest(initial=initial):
+                terminal = self.terminal(f'shown_boxes = "net"\niface_view = "{initial}"\n')
+                self.assert_view(terminal, initial)
+                # Seed a complete config so a view-only change must request a write.
+                terminal.relaunch()
+                self.assert_view(terminal, initial)
+                terminal.key('v')
+                self.assert_view(terminal, final)
+                terminal.relaunch()
+                self.assert_view(terminal, final)
+                self.assertIn(f'iface_view = "{final}"', terminal.config.read_text())
+
+    def test_filter_confirmation_and_cancelled_drafts_are_remembered(self):
+        for draft in ['confirm', 'cancel', 'invalid']:
+            with self.subTest(draft=draft):
+                terminal = self.terminal('shown_boxes = "net"\niface_view = "detail"\n')
+                self.assert_view(terminal, 'detail')
+                terminal.key('I')
+                terminal.wait_for('Include:')
+                if draft == 'invalid':
+                    terminal.key('[')
+                    terminal.key('\r')
+                    terminal.wait_for('Invalid: include')
+                terminal.key('\r' if draft == 'confirm' else '\x1b')
+                expected = 'compact' if draft == 'confirm' else 'detail'
+                self.assert_view(terminal, expected)
+                terminal.relaunch()
+                self.assert_view(terminal, expected)
+
+    def test_reload_saves_the_active_view(self):
+        terminal = self.terminal('shown_boxes = "net"\niface_view = "compact"\n')
+        self.assert_view(terminal, 'compact')
+        terminal.config.write_text('shown_boxes = "net"\niface_view = "detail"\niface_sorting = "alnum"\n')
+        terminal.process.send_signal(__import__('signal').SIGUSR2)
+        terminal.wait_for('alnum')
+        self.assert_view(terminal, 'compact')
+        terminal.relaunch()
+        self.assert_view(terminal, 'compact')
+
+    def test_disabled_saving_preserves_configured_view(self):
+        terminal = self.terminal('shown_boxes = "net"\niface_view = "detail"\nsave_config_on_exit = false\n')
+        original = terminal.config.read_text()
+        self.assert_view(terminal, 'detail')
+        terminal.key('v')
+        self.assert_view(terminal, 'compact')
+        terminal.relaunch()
+        self.assertEqual(terminal.config.read_text(), original)
+        self.assert_view(terminal, 'detail')
+
+    def test_hidden_net_preserves_last_active_or_uninitialized_view(self):
+        for shown in [False, True]:
+            with self.subTest(shown=shown):
+                boxes = 'net proc' if shown else 'proc'
+                terminal = self.terminal(f'shown_boxes = "{boxes}"\niface_view = "compact"\n')
+                terminal.wait_for('Pid:')
+                if shown:
+                    self.assert_view(terminal, 'compact')
+                    terminal.key('v')
+                    self.assert_view(terminal, 'detail')
+                    terminal.key('3')
+                terminal.relaunch()
+                expected = 'detail' if shown else 'compact'
+                self.assertIn(f'iface_view = "{expected}"', terminal.config.read_text())
+                terminal.wait_for('Pid:')
+                terminal.key('3')
+                self.assert_view(terminal, expected)
 
     def test_process_confirmation_owns_delete_and_outside_click_cancels(self):
         terminal = self.terminal('shown_boxes = "net proc"\niface_include = "lo|eth"\n', width=120, height=30)

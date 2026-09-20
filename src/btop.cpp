@@ -235,7 +235,12 @@ void clean_quit(int sig) {
 #endif
 
 
+	Config::unlock();
 	if (Config::getB("save_config_on_exit")) {
+		if (Net::compact_view_initialized) {
+			const string view = Net::iface_compact_view_active ? "compact" : "detail";
+			if (Config::getS("iface_view") != view) Config::set("iface_view", view);
+		}
 		Config::write();
 	}
 
