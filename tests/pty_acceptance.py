@@ -137,7 +137,7 @@ class Acceptance(unittest.TestCase):
                 self.assertIn('del', terminal.read())
                 terminal.key('\x1b[3~')
                 terminal.wait_for('page 1/')
-                terminal.key('\r')
+                terminal.key('v')
                 self.assertNotIn('page 1/', terminal.read())
                 terminal.key('q')
                 terminal.process.wait(5)
@@ -218,6 +218,17 @@ class Acceptance(unittest.TestCase):
                 terminal.wait_for('Pid:')
                 terminal.key('3')
                 self.assert_view(terminal, expected)
+
+    def test_process_navigation_does_not_cancel_compact_net_view(self):
+        terminal = self.terminal('shown_boxes = "net proc"\niface_view = "compact"\n', width=120, height=30)
+        terminal.wait_for('page 1/')
+        terminal.key('\x1b[B')
+        terminal.key('\r')
+        terminal.wait_for('page 1/')
+        terminal.key('v')
+        self.assertNotIn('page 1/', terminal.read())
+        terminal.key('v')
+        terminal.wait_for('page 1/')
 
     def test_process_confirmation_owns_delete_and_outside_click_cancels(self):
         terminal = self.terminal('shown_boxes = "net proc"\niface_include = "lo|eth"\n', width=120, height=30)

@@ -1573,6 +1573,10 @@ namespace Net {
 		};
 
 		string hints;
+		const int view_hint_x = iface_compact_view_active ? x + width - 12 : x + 2;
+		hints += Mv::to(y + height - 1, view_hint_x) + Theme::c("hi_fg") + "v";
+		if (not iface_compact_view_active) hints += " " + Theme::c("title") + "compact";
+		Input::mouse_mappings["v"] = {y + height - 1, view_hint_x, 1, iface_compact_view_active ? 1 : 9};
 		hints += Mv::to(y + height - 1, x + width - 10) + Theme::c("hi_fg") + "I";
 		Input::mouse_mappings["I"] = {y + height - 1, x + width - 10, 1, 1};
 		Input::mouse_mappings.erase("clear_iface");
