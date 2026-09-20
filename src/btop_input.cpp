@@ -253,9 +253,9 @@ namespace Input {
 				Runner::run("all", true, true);
 				return;
 			}
-			if (not filtering and Net::shown and Net::iface_compact_view_active and key == "enter") {
+			if (not filtering and Net::shown and key == "v") {
 				atomic_wait(Runner::active);
-				if (not Net::selected_iface.empty()) Net::iface_compact_view_active = false;
+				if (not Net::selected_iface.empty()) Net::iface_compact_view_active = not Net::iface_compact_view_active;
 				Runner::run("net", true, true);
 				return;
 			}
