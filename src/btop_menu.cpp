@@ -797,7 +797,7 @@ namespace Menu {
 			{"iface_exclude",
 				"Interface exclude pattern.", "", "Case-sensitive POSIX extended regex search.", "Exclusion wins over inclusion."},
 			{"iface_view",
-				"Initial interface view.", "", "detail or compact."},
+				"Initial interface view.", "", "detail or compact.", "Restores the last active view when", "save_config_on_exit is enabled."},
 			{"iface_sorting",
 				"Interface ordering.", "", "total, speed, or alnum."},
 			{"iface_reversed",

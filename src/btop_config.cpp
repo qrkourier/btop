@@ -246,7 +246,8 @@ namespace Config {
 
 		{"iface_exclude", 		"#* Case-sensitive POSIX extended regular expression searched in interface names. Empty excludes none."},
 
-		{"iface_view", 			"#* Network interface view: \"detail\" or \"compact\"."},
+		{"iface_view", 			"#* Network interface view: \"detail\" or \"compact\".\n"
+								"#* Restores the last active view when save_config_on_exit is enabled."},
 
 		{"iface_sorting", 		"#* Network interface sorting: \"total\", \"speed\" or \"alnum\"."},
 
