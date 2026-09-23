@@ -231,6 +231,11 @@ namespace Net {
 		return layout;
 	}
 
+	compact_slot_position compact_position_for_slot(int slot, int rows) {
+		const int safe_rows = std::max(1, rows);
+		return {slot / safe_rows, slot % safe_rows};
+	}
+
 	bool compact_scale::change_page(int current_page) {
 		if (page == current_page) return false;
 		page = current_page;

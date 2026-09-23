@@ -1627,8 +1627,9 @@ namespace Net {
 				if (info_it == current_net.end()) continue;
 				const auto tile = compact_tile(name, info_it->second, layout.tile_width,
 					net_auto ? ceiling : down_max, net_auto ? ceiling : up_max);
-				const int tx = x + 1 + (slot % layout.columns) * layout.tile_width;
-				const int ty = y + 1 + (slot / layout.columns) * 3;
+				const auto position = compact_position_for_slot(slot, layout.rows);
+				const int tx = x + 1 + position.column * layout.tile_width;
+				const int ty = y + 1 + position.row * 3;
 				fmt::format_to(std::back_inserter(compact), "{}{}{}{}{}", Mv::to(ty, tx),
 					name == selected_iface ? Theme::c("selected_bg") + Theme::c("selected_fg") + Fx::b : Theme::c("title"),
 					name == selected_iface ? ">" : " ", tile.name, Fx::reset);
