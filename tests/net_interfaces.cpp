@@ -100,6 +100,19 @@ TEST(CompactInterfaceModel, CalculatesPagedGridGeometry) {
 	EXPECT_GE(narrow.meter_width, 3);
 }
 
+TEST(CompactInterfaceModel, FillsColumnsFromTopToBottom) {
+	EXPECT_EQ(Net::compact_position_for_slot(0, 3).column, 0);
+	EXPECT_EQ(Net::compact_position_for_slot(0, 3).row, 0);
+	EXPECT_EQ(Net::compact_position_for_slot(1, 3).column, 0);
+	EXPECT_EQ(Net::compact_position_for_slot(1, 3).row, 1);
+	EXPECT_EQ(Net::compact_position_for_slot(2, 3).column, 0);
+	EXPECT_EQ(Net::compact_position_for_slot(2, 3).row, 2);
+	EXPECT_EQ(Net::compact_position_for_slot(3, 3).column, 1);
+	EXPECT_EQ(Net::compact_position_for_slot(3, 3).row, 0);
+	EXPECT_EQ(Net::compact_position_for_slot(8, 3).column, 2);
+	EXPECT_EQ(Net::compact_position_for_slot(8, 3).row, 2);
+}
+
 TEST(CompactInterfaceModel, AutoScaleRaisesImmediatelyAndLowersAfterFiveSamples) {
 	Net::compact_scale scale;
 	EXPECT_EQ(scale.update(20 << 10, 0), 26U << 10);

@@ -353,6 +353,11 @@ namespace Net {
 		int meter_width{};
 	};
 
+	struct compact_slot_position {
+		int column{};
+		int row{};
+	};
+
 	struct compact_scale {
 		uint64_t ceiling{10 << 10};
 		uint64_t previous_sample{};
@@ -402,6 +407,7 @@ namespace Net {
 	void rebuild_interfaces(std::unordered_map<string, net_info>& net);
 	bool has_interface(const string& name);
 	auto compact_layout(int width, int height, int count, int selected) -> compact_layout_info;
+	compact_slot_position compact_position_for_slot(int slot, int rows);
 
 	class IfAddrsPtr {
 		struct ifaddrs* ifaddr;
